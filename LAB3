@@ -1,0 +1,264 @@
+#include <Wire.h>
+#include <LedControl.h>
+
+const int PIN_SQW    = 2;   // DS1307 SQW -> D2
+const int PIN_BUTTON = 5;   // Button -> D5 to GND
+
+// MAX7219 dot matrix: DIN=11, CLK=13, CS=10
+LedControl lc = LedControl(11, 13, 10, 1);
+
+
+const int MAX_VALUE = 15;            // count 0..15
+const int PRESS_TARGET = 10;         // must be pressed at 10
+const unsigned long STEP_MS   = 500; // time per number
+const unsigned long WINDOW_MS = 300; // easier margin (increase to 400/500 if needed)
+
+// DS1307 SQW set to 4kHz. With CHANGE interrupt:
+// 4kHz square wave => 8000 edges/sec => 8 edges per ms
+const unsigned long EDGES_PER_MS = 8;
+
+//sqw edge counter
+volatile unsigned long edgeCount = 0;
+void onSQW() { edgeCount++; }
+
+unsigned long readEdges() {
+  noInterrupts();
+  unsigned long e = edgeCount;
+  interrupts();
+  return e;
+}
+
+// DS1307 CONFIG 
+void enableSQW_4kHz() {
+  Wire.beginTransmission(0x68);
+  Wire.write(0x07);   // control register
+  Wire.write(0x11);   // SQWE=1, RS1=0, RS0=1 => 4kHz
+  Wire.endTransmission();
+}
+
+// button (edge + debounce)
+bool pressedEvent() {
+  static bool last = HIGH;
+  bool now = digitalRead(PIN_BUTTON);
+
+  if (last == HIGH && now == LOW) {
+    delay(200); // debounce
+    last = now;
+    return true;
+  }
+  last = now;
+  return false;
+}
+
+// ---------------- 8x8 DIGITS ----------------
+const byte DIGIT[10][8] = {
+  {B00111100,B01100110,B01101110,B01110110,B01100110,B01100110,B00111100,B00000000}, //0
+  {B00011000,B00111000,B00011000,B00011000,B00011000,B00011000,B00111100,B00000000}, //1
+  {B00111100,B01100110,B00000110,B00001100,B00110000,B01100000,B01111110,B00000000}, //2
+  {B00111100,B01100110,B00000110,B00011100,B00000110,B01100110,B00111100,B00000000}, //3
+  {B00001100,B00011100,B00101100,B01001100,B01111110,B00001100,B00001100,B00000000}, //4
+  {B01111110,B01100000,B01111100,B00000110,B00000110,B01100110,B00111100,B00000000}, //5
+  {B00111100,B01100110,B01100000,B01111100,B01100110,B01100110,B00111100,B00000000}, //6
+  {B01111110,B00000110,B00001100,B00011000,B00110000,B00110000,B00110000,B00000000}, //7
+  {B00111100,B01100110,B01100110,B00111100,B01100110,B01100110,B00111100,B00000000}, //8
+  {B00111100,B01100110,B01100110,B00111110,B00000110,B01100110,B00111100,B00000000}  //9
+};
+
+void drawDigit(int d) {
+  lc.clearDisplay(0);
+  for (int r = 0; r < 8; r++) lc.setRow(0, r, DIGIT[d][r]);
+}
+
+// compact "10"
+void drawTen() {
+  const byte TEN[8] = {
+    B11000111,B11001101,B11011101,B11110101,
+    B11000101,B11000101,B11000111,B00000000
+  };
+  lc.clearDisplay(0);
+  for (int r = 0; r < 8; r++) lc.setRow(0, r, TEN[r]);
+}
+
+// compact "11"
+void drawEleven() {
+  const byte ELEVEN[8] = {
+    B11011101,
+    B11011101,
+    B11011101,
+    B11011101,
+    B11011101,
+    B11011101,
+    B11011101,
+    B00000000
+  };
+  lc.clearDisplay(0);
+  for (int r = 0; r < 8; r++) lc.setRow(0, r, ELEVEN[r]);
+}
+
+// compact "12"
+void drawTwelve() {
+  const byte TWELVE[8] = {
+    B11000111,
+    B11001101,
+    B11000001,
+    B11000111,
+    B11010100,
+    B11010100,
+    B11011111,
+    B00000000
+  };
+  lc.clearDisplay(0);
+  for (int r = 0; r < 8; r++) lc.setRow(0, r, TWELVE[r]);
+}
+
+// compact "13"
+void drawThirteen() {
+  const byte THIRTEEN[8] = {
+    B11000111,
+    B11001101,
+    B11000001,
+    B11000111,
+    B11000001,
+    B11001101,
+    B11000111,
+    B00000000
+  };
+  lc.clearDisplay(0);
+  for (int r = 0; r < 8; r++) lc.setRow(0, r, THIRTEEN[r]);
+}
+
+// compact "14"
+void drawFourteen() {
+  const byte FOURTEEN[8] = {
+    B11001001,
+    B11011001,
+    B11101001,
+    B11001001,
+    B11011111,
+    B11000001,
+    B11000001,
+    B00000000
+  };
+  lc.clearDisplay(0);
+  for (int r = 0; r < 8; r++) lc.setRow(0, r, FOURTEEN[r]);
+}
+
+// compact "15"
+void drawFifteen() {
+  const byte FIFTEEN[8] = {
+    B11011111,
+    B11010000,
+    B11011110,
+    B11000001,
+    B11000001,
+    B11001101,
+    B11000111,
+    B00000000
+  };
+  lc.clearDisplay(0);
+  for (int r = 0; r < 8; r++) lc.setRow(0, r, FIFTEEN[r]);
+}
+
+void showValue(int v) {
+  if (v <= 9) drawDigit(v);
+  else if (v == 10) drawTen();
+  else if (v == 11) drawEleven();
+  else if (v == 12) drawTwelve();
+  else if (v == 13) drawThirteen();
+  else if (v == 14) drawFourteen();
+  else drawFifteen();
+}
+
+void blinkTen(int times) {
+  for (int i = 0; i < times; i++) {
+    lc.clearDisplay(0);
+    delay(300);
+    drawTen();
+    delay(300);
+  }
+}
+
+// Vairables of game
+bool running = false;
+unsigned long startEdges = 0;
+int value = 0;
+
+void resetGame() {
+  noInterrupts();
+  edgeCount = 0;
+  interrupts();
+
+  running = false;
+  value = 0;
+  showValue(0);
+}
+
+void setup() {
+  pinMode(PIN_BUTTON, INPUT_PULLUP);
+  pinMode(PIN_SQW, INPUT_PULLUP);   // open-drain line
+
+  Wire.begin();
+  enableSQW_4kHz();
+
+  attachInterrupt(digitalPinToInterrupt(PIN_SQW), onSQW, CHANGE);
+
+  lc.shutdown(0, false);
+  lc.setIntensity(0, 8);
+  lc.clearDisplay(0);
+
+  resetGame();
+}
+
+void loop() {
+  unsigned long eNow = readEdges();
+
+  // Start/Stop button
+  if (pressedEvent()) {
+    if (!running) {
+      // START
+      running = true;
+      startEdges = eNow;
+      value = 0;
+      showValue(0);
+    } else {
+      // STOP + EVALUATE
+      unsigned long elapsedEdges = eNow - startEdges;
+
+      unsigned long targetMs    = (unsigned long)PRESS_TARGET * STEP_MS;
+      unsigned long targetEdges = targetMs * EDGES_PER_MS;
+      unsigned long windowEdges = WINDOW_MS * EDGES_PER_MS;
+
+      long errEdges = (long)elapsedEdges - (long)targetEdges;
+      if (errEdges < 0) errEdges = -errEdges;
+
+      // Freeze display 
+      unsigned long elapsedMs = elapsedEdges / EDGES_PER_MS;
+      int stoppedValue = (int)(elapsedMs / STEP_MS);
+      if (stoppedValue > MAX_VALUE) stoppedValue = MAX_VALUE;
+      showValue(stoppedValue);
+
+      delay(400);
+
+      // Blink result using "10"
+      if ((unsigned long)errEdges <= windowEdges) blinkTen(2); 
+      else blinkTen(3);                                      
+
+      delay(500);
+      resetGame();
+    }
+  }
+
+  // While running, update display
+  if (running) {
+    unsigned long elapsedEdges = eNow - startEdges;
+    unsigned long elapsedMs = elapsedEdges / EDGES_PER_MS;
+
+    int newValue = (int)(elapsedMs / STEP_MS);
+    if (newValue > MAX_VALUE) newValue = MAX_VALUE;
+
+    if (newValue != value) {
+      value = newValue;
+      showValue(value);
+    }
+  }
+}
