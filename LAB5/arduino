@@ -1,0 +1,51 @@
+#include <LiquidCrystal.h>
+
+// LCD pins
+LiquidCrystal lcd(7,6,5,4,3,2);
+
+const int soundPin = A0;
+const int ledPin = 9;
+
+unsigned long lastUpdate = 0;
+int threshold = 100;
+
+void setup()
+{
+  Serial.begin(115200);
+
+  lcd.begin(16,2);
+  lcd.print("Sound Monitor");
+
+  pinMode(ledPin, OUTPUT);
+}
+
+void loop()
+{
+  int soundValue = analogRead(soundPin);
+
+  // LCD-ni hər 100 ms yenilə
+  if(millis() - lastUpdate > 100)
+  {
+    lastUpdate = millis();
+
+    lcd.setCursor(0,1);
+    lcd.print("Value:");
+    lcd.print(soundValue);
+    lcd.print("   ");
+  }
+
+  // threshold yoxlama
+  if(soundValue > threshold)
+  {
+    digitalWrite(ledPin, HIGH);
+  }
+  else
+  {
+    digitalWrite(ledPin, LOW);
+  }
+
+  // Python GUI üçün serial məlumat
+  Serial.print(millis());
+  Serial.print(",");
+  Serial.println(soundValue);
+}
